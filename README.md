@@ -1,55 +1,205 @@
-# Aria – Voice Support Agent for Aura Skincare
+# Aria — AI Voice Support Agent for Aura Skincare
 
-Browser-based voice agent. Click **Start Call**, talk to Aria, click **End Call** to get the transcript and a JSON summary.
-No LLM and no API keys: the whole agent is plain Python.
+A browser-based voice customer support agent for a fictional D2C skincare brand. Click **Start Call**, speak naturally, and Aria answers using brand policies and live order lookups. When the call ends, you get a transcript and a structured JSON outcome.
 
-## Stack
-- Frontend: Vite + React
-- Backend: Flask (also serves the built frontend, so one deploy)
-- Speech-to-text and text-to-speech: browser Web Speech API (`en-IN`), Chrome or Edge
-- Agent: rule-based dialogue manager in `backend/agent.py` (regex intent detection, entity extraction, templated replies)
-- Data: in-memory mock orders in `backend/orders.py`
+**Live demo:** [aura-voice-agent-liard.vercel.app](https://aura-voice-agent-liard.vercel.app/)
+Use **Chrome or Edge** and allow microphone access.
+
+![Aria voice agent UI](docs/screenshot.png)
+
+---
+
+## Features
+
+- Natural voice conversation in the browser, with no telephony setup
+- Indian English voice (`en-IN`)
+- Live state indicator: Listening, Thinking, Speaking
+- Order lookup through tool functions: `get_order_details`, `cancel_order`
+- Policy enforcement for returns, cancellations, shipping and COD
+- Graceful handling of invalid or missing order IDs, unclear audio, and out-of-scope requests
+- Interrupt button to stop the agent mid-sentence
+- Post-call transcript and structured JSON summary
+- Test orders panel on the page, so order lookups can be tried right away
+- Runs with no API keys and no LLM
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | Vite + React |
+| Backend | Flask (Python) |
+| Speech-to-text | Browser Web Speech API (`SpeechRecognition`) |
+| Text-to-speech | Browser `speechSynthesis` |
+| Agent | Rule-based dialogue manager (`backend/agent.py`) |
+| Data | In-memory mock orders (`backend/orders.py`) |
+| Hosting | Vercel (static frontend + Python serverless function) |
 
 ## Architecture
-```
-Mic -> SpeechRecognition (browser) -> POST /api/chat {text, context}
-                                         |
-                       agent.respond(): detect intent -> extract order ID / days / opened
-                                         -> call tools (get_order_details, cancel_order) -> pick reply template
-                                         |
-Speakers <- speechSynthesis (browser) <- {reply, context}
-```
-- The server is stateless. The browser sends back the `context` (last order, pending question, what has happened so far) with each turn.
-- UI state machine: Listening -> Thinking -> Speaking -> Listening.
-- On End Call, `/api/summary` builds the JSON outcome from the context. No model involved.
 
-## Run
+```
+Microphone
+   |
+SpeechRecognition (browser)
+   |  text
+   v
+POST /api/chat  { text, context }
+   |
+   |  agent.respond():
+   |    1. detect intent (regex rules)
+   |    2. extract order ID, days, opened/unopened
+   |    3. call tools (get_order_details / cancel_order)
+   |    4. enforce policy and choose reply
+   v
+{ reply, context }
+   |
+speechSynthesis (browser)  ->  Speakers
+```
+
+- **Stateless server:** the conversation state (`context`) is returned to the browser and sent back with each turn, so the backend runs well on serverless platforms.
+- **Summary:** on End Call, `POST /api/summary` builds the JSON outcome from the call context.
+- **Guardrails live in code:** replies come from templates driven by the policy rules, so the agent cannot be talked into promising a refund outside policy.
+
+## Quick start
+
+### Prerequisites
+- Python 3.9+
+- Node.js 18+
+- Chrome or Edge
+
+### 1. Clone the repo
 ```bash
-./run.sh      # macOS / Linux
-run.bat       # Windows
+git clone https://github.com/chalakbilla/aura-voice-agent.git
+cd aura-voice-agent
 ```
-Then open http://localhost:5173 in Chrome or Edge. Manual run: `python app.py` in `backend`, `npm run dev` in `frontend`.
 
-## Deploy on Vercel (one repo, one project)
-1. Push the whole folder to GitHub (frontend, backend, api, vercel.json).
-2. Vercel -> Add New Project -> import the repo. Leave the framework preset as "Other"; `vercel.json` sets the build and output.
-3. Deploy. The React app is served as static files and `/api/*` is handled by `api/index.py`, which loads the Flask app from `backend/`. Same domain, so no CORS or env vars needed.
+### 2. Launch with one command
 
-The agent keeps no server state (call context lives in the browser), which is why it works on serverless.
+**macOS / Linux**
+```bash
+chmod +x run.sh
+./run.sh
+```
 
-## Deploy on Render (alternative)
-Create a Blueprint from `render.yaml`. Needs HTTPS for the microphone, which both platforms provide.
+**Windows**
+```bat
+run.bat
+```
 
-## How the requirements are met
-- **Order lookup:** `get_order_details` is called whenever an order ID is heard ("ORD 101", "order one zero one", "ord-101" all work). Missing ID -> asks for it. Unknown ID -> asks to verify.
-- **Policy:** return rules check days and opened/unopened status; cancellation checks order status in code and asks for confirmation first.
-- **Out of scope / unknown:** off-topic words get a polite refusal; skincare questions the agent has no data on get "I don't have that information".
-- **Unclear audio:** low-confidence recognition results get a "could you repeat?" reply.
-- **Hinglish:** a few Hinglish keywords are recognised (kahan, kab aayega, wapas, haan, nahi); replies are in English.
-- **Interrupt:** an Interrupt button stops Aria while she speaks.
+The script creates a Python virtual environment, installs backend and frontend dependencies, and starts both servers in a single terminal.
 
-## Section 9 – How I think (edit in your own words before submitting)
-1. **Architecture:** I wanted something deterministic, free and fast. Browser speech APIs remove network hops for voice, and a rule-based dialogue manager gives instant replies and makes policy enforcement exact: the agent cannot be talked into a refund because the reply comes from code, not a model. The cost is narrower language understanding.
-2. **Hardest part:** Keeping a conversation coherent without an LLM: follow-ups like "yes", "it's unopened" or a bare "101" only make sense with context. I solved it with a small context object (pending question, last order, topic) that the client returns each turn, so the server stays stateless.
-3. **One more week:** Add an LLM only for understanding (intent and entity extraction) while keeping the same code-enforced policy and tools. This handles free-form phrasing, and the guardrails stay deterministic. Then streaming speech and true barge-in.
-4. **At 1,000 calls/day:** Store calls and summaries in Postgres, add auth and rate limiting, move to server-side streaming speech for consistent quality across browsers, log unrecognised utterances to grow the intent coverage, add regression tests for conversations, and hand off to a human when the agent is unsure.
+| Service | URL |
+|---|---|
+| Frontend | http://localhost:5173 |
+| Backend | http://localhost:5000 |
+
+Press `Ctrl+C` to stop both.
+
+### Manual run (optional)
+```bash
+# Terminal 1 - backend
+cd backend
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+python app.py
+
+# Terminal 2 - frontend
+cd frontend
+npm install
+npm run dev
+```
+
+## Test scenarios
+
+Sample orders are shown on the page.
+
+| Order | Customer | Product | Value | Status |
+|---|---|---|---|---|
+| ORD-101 | Priya Sharma | Vitamin C Serum (30ml) | ₹699 | Out for Delivery |
+| ORD-102 | Rahul Verma | Hydrating Sunscreen SPF 50 | ₹499 | Delivered 14 days ago |
+| ORD-103 | Ananya Patel | Green Tea Face Wash + Toner | ₹850 | Processing |
+
+| Say this | Expected behaviour |
+|---|---|
+| "Where is my order ORD-101?" | Looks up the order and reports it is out for delivery by 6 PM |
+| "I bought this 20 days ago and opened it. Can I return it?" | Politely explains it is outside the return policy |
+| "Cancel ORD-103" | Confirms, then cancels (status is Processing) |
+| "Cancel ORD-101" | Declines (already out for delivery), mentions refusing at the doorstep |
+| "Check order ORD-999" | Says no such order was found and asks to verify the ID |
+| "Where is my order?" | Asks for the order ID |
+| "Book me a flight to Goa" | Says it can only help with Aura Skincare queries |
+| "Is cash on delivery available?" | Explains COD up to ₹2,500, cash or UPI |
+
+## Post-call output
+
+```json
+{
+  "customer_intent": "ORDER_TRACKING",
+  "order_id": "ORD-101",
+  "resolution_status": "RESOLVED",
+  "call_summary": "Order ORD-101 is out for delivery. Expected by 6 PM today."
+}
+```
+
+`resolution_status` is one of `RESOLVED`, `UNRESOLVED`, `POLICY_DECLINED`, `OUT_OF_SCOPE`, `INCOMPLETE`.
+
+## API
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/orders` | Returns the mock order database |
+| POST | `/api/chat` | Body: `{ text, context }`. Returns `{ reply, context, intent, tool_calls }` |
+| POST | `/api/summary` | Body: `{ context }`. Returns the structured call outcome |
+
+## Project structure
+
+```
+aura-voice-agent/
+├── api/index.py          # Vercel serverless entry (loads the Flask app)
+├── backend/
+│   ├── app.py            # Flask routes
+│   ├── agent.py          # Intent detection, policy logic, replies, summary
+│   ├── orders.py         # Mock order data and tool functions
+│   └── requirements.txt
+├── frontend/
+│   └── src/              # React UI, voice loop, API client
+├── docs/screenshot.png
+├── vercel.json
+├── run.sh                # macOS / Linux launcher
+└── run.bat               # Windows launcher
+```
+
+## Deployment (Vercel)
+
+1. Push the repo to GitHub.
+2. Import it in Vercel with **Application Preset: Other** and root directory `./`.
+3. Deploy. `vercel.json` builds the frontend and routes `/api/*` to the Flask function.
+
+No environment variables are needed.
+
+## Known limitations
+
+- Understanding is rule-based, so unusual phrasings may get a "didn't quite get that" reply. New phrasings can be added in `INTENT_PATTERNS` in `backend/agent.py`.
+- Speech quality depends on the browser's built-in recognition and voices; Chrome or Edge is recommended.
+- Replies are in English; only a few Hinglish keywords are recognised (for example "kahan", "kab aayega", "wapas", "haan", "nahi").
+- Echo can occur on speakers, so the agent stops listening while it speaks. Headphones give the best experience.
+
+---
+
+## Design notes
+
+**1. Why this architecture and stack?**
+I wanted a deterministic, free and fast system. Browser speech APIs remove network hops for voice, and a rule-based dialogue manager gives instant replies and makes policy enforcement exact: the reply comes from code, not from a model that might agree to anything. Flask keeps the backend small, and React gives a simple, reliable call UI. The cost is narrower language understanding.
+
+**2. What was the most difficult part, and how did I solve it?**
+Keeping a conversation coherent without an LLM. Follow-ups like "yes", "it's unopened" or a bare "101" only make sense with context. I solved it with a small context object (pending question, last order, topic, outcomes) that the client returns every turn, which also keeps the server stateless. The second challenge was turn-taking: recognition picks up the agent's own voice, so the app stops listening while Aria speaks and resumes afterwards.
+
+**3. With one more week, what would I improve first?**
+Add an LLM purely for understanding (intent and entity extraction) while keeping policy checks and tools in code. This handles free-form phrasing and Hinglish better and keeps the guardrails deterministic. After that: streaming speech with true barge-in and a higher-quality Indian-accent TTS.
+
+**4. What would change at 1,000 conversations a day?**
+Persist calls, transcripts and summaries in Postgres; add authentication, rate limiting and monitoring; move to server-side streaming STT/TTS for consistent quality across browsers; log unrecognised utterances to expand coverage; add regression tests for conversation flows; and hand off to a human agent when the bot is unsure.
+
+## Author
+
+[Ankit Raj](https://www.linkedin.com/in/ankitpvxt)
