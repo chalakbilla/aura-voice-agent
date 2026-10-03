@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: aura-voice-agent
+    runtime: python
+    buildCommand: cd frontend && npm install && npm run build && cd ../backend && pip install -r requirements.txt
+    startCommand: cd backend && gunicorn app:app
